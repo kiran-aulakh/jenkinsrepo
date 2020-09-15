@@ -1,0 +1,64 @@
+ node {
+    def mvnHome
+    stage('checkout') {
+        git 'https://github.com/kiran-aulakh/jenkinsrepo.git'
+       tool name: 'Maven3', type: 'maven'
+           stage 'Build'
+           bat 'mvn -f Hello-World-JAVA-master/pom.xml clean  package -Dmaven.test.skip=true'
+
+           stage 'Unit testing'
+           bat 'mvn -f Hello-World-JAVA-master/pom.xml clean test'
+
+        stage('SonarQube analysis') {
+            withSonarQubeEnv(installationName: 'Test_Sonar') {
+            bat 'mvn -f Hello-World-JAVA-master/pom.xml org.sonarsource.scanner.maven:sonar-maven-plugin:3.7.0.1746:sonar'
+    }
+  }
+
+ stage ('Artifactory Deploy'){
+script {
+def server = Artifactory.server('123456789@artifactory')
+def rtMaven = Artifactory.newMavenBuild()
+rtMaven.resolver server: server, releaseRepo: 'libs-release', snapshotRepo: 'libs-snapshot'
+rtMaven.deployer server: server, releaseRepo: 'libs-release-local', snapshotRepo: 'libs-snapshot-local'
+rtMaven.tool = 'Maven3'
+def buildInfo = rtMaven.run pom: 'Hello-World-JAVA-master/pom.xml', goals: '-U clean install'
+server.publishBuildInfo buildInfo
+
+stage('Docker image'){
+    dir('Hello-World-JAVA-master/'){
+    bat 'docker build -t dtr.nagarro.com:443/i-kiranbirkaur-master%BUILD_NUMBER% --no-cache -f Dockerfile .'
+    }
+}
+}
+}
+//stage('Push to DTR'){
+  //dir('Hello-World-JAVA-master/'){
+//        bat 'docker push dtr.nagarro.com:443/i-kiranbirkaur-master%BUILD_NUMBER%'
+ //   }
+//}
+stage('Stop running containers'){
+  bat '''
+  FOR /F  %%i IN ('docker ps ^| findstr 6000') do set containerId=%%i
+echo %containerId%
+If "%containerId%" == "" (
+  echo "No Container running"
+) ELSE (
+  docker stop %ContainerId%
+  docker rm -f %ContainerId%
+)
+  '''
+}
+
+stage('Docker deployment'){
+    bat 'docker run --name c-kiranbirkaur-master%BUILD_NUMBER% -d -p 6000:7000 dtr.nagarro.com:443/i-kiranbirkaur-master%BUILD_NUMBER%'
+}
+
+stage('helm charts deployment'){
+    dir('Hello-World-JAVA-master/'){
+    bat 'helm install chart my-chart'
+    }
+}
+
+}
+}
